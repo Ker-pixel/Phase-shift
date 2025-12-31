@@ -155,9 +155,16 @@
         let sideRepeatCount = 0;
 
         function handleInput() {
-            if (!gameActive) restart();
-            else playerSide = playerSide === 0 ? 1 : 0;
-            if (audioCtx.state === 'suspended') audioCtx.resume();
+            // This is the "magic key" for mobile apps
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            if (!gameActive) {
+                restart();
+            } else {
+                playerSide = playerSide === 0 ? 1 : 0;
+            }
         }
         window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
         window.addEventListener('mousedown', handleInput);
