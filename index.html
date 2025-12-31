@@ -53,76 +53,72 @@
         const scoreElement = document.getElementById('score');
         const highScoreElement = document.getElementById('highScore');
 
-        // --- ENHANCED AUDIO ENGINE ---
+        // --- STUDIO GRADE AUDIO ENGINE ---
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const filter = audioCtx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(800, audioCtx.currentTime); 
-        filter.connect(audioCtx.destination);
+        const compressor = audioCtx.createDynamicsCompressor();
+        compressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+        compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+        compressor.connect(audioCtx.destination);
 
         let pulseSize = 0;
-        let step = 0;
-        const notes = [220.00, 261.63, 293.66, 329.63, 392.00]; 
+        let tick = 0;
+        const chords = [
+            { bass: 55.00, melody: [220, 261, 329, 392] }, // Am
+            { bass: 43.65, melody: [174, 220, 261, 349] }, // F
+            { bass: 49.00, melody: [196, 246, 293, 392] }, // G
+            { bass: 41.20, melody: [164, 207, 246, 329] }  // E
+        ];
 
-        function playSynthStep() {
+        function playMusicTick() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const now = audioCtx.currentTime;
+            const chordIdx = Math.floor((tick % 64) / 16);
+            const currentChord = chords[chordIdx];
 
-            // 1. SMOOTH BASS
+            // 1. THE BEAT
+            if (tick % 4 === 0) {
+                const kick = audioCtx.createOscillator();
+                const kG = audioCtx.createGain();
+                kick.frequency.setValueAtTime(120, now);
+                kick.frequency.exponentialRampToValueAtTime(0.01, now + 0.15);
+                kG.gain.setValueAtTime(0.3, now);
+                kG.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                kick.connect(kG); kG.connect(compressor);
+                kick.start(); kick.stop(now + 0.15);
+                pulseSize = 15;
+            }
+            
+            // 2. THE BASS GALLOP
             const bass = audioCtx.createOscillator();
-            const bassGain = audioCtx.createGain();
-            bass.type = 'triangle';
-            bass.frequency.setValueAtTime(55, now); 
-            bassGain.gain.setValueAtTime(0, now);
-            bassGain.gain.linearRampToValueAtTime(0.15, now + 0.02);
-            bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-            bass.connect(bassGain);
-            bassGain.connect(filter);
-            bass.start(); bass.stop(now + 0.3);
+            const bG = audioCtx.createGain();
+            const bF = audioCtx.createBiquadFilter();
+            bass.type = 'sawtooth';
+            bass.frequency.setValueAtTime(currentChord.bass, now);
+            bF.type = 'lowpass'; bF.frequency.setValueAtTime(150, now);
+            bG.gain.setValueAtTime(0, now);
+            bG.gain.linearRampToValueAtTime(0.12, now + 0.01);
+            bG.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            bass.connect(bF); bF.connect(bG); bG.connect(compressor);
+            bass.start(); bass.stop(now + 0.1);
 
-            // 2. SOFT MELODY
-            if (step % 2 === 0) {
-                const mel = audioCtx.createOscillator();
-                const melGain = audioCtx.createGain();
-                mel.type = 'sine';
-                const noteIdx = (step + Math.floor(Math.random() * 2)) % notes.length;
-                mel.frequency.setValueAtTime(notes[noteIdx], now);
-                melGain.gain.setValueAtTime(0, now);
-                melGain.gain.linearRampToValueAtTime(0.06, now + 0.01);
-                melGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
-                mel.connect(melGain);
-                melGain.connect(filter);
-                mel.start(); mel.stop(now + 0.2);
+            // 3. SHIMMERING ARPEGGIO
+            if (tick % 2 === 0) {
+                const arp = audioCtx.createOscillator();
+                const aG = audioCtx.createGain();
+                arp.type = 'triangle';
+                arp.frequency.setValueAtTime(currentChord.melody[tick % 4] * 2, now);
+                aG.gain.setValueAtTime(0, now);
+                aG.gain.linearRampToValueAtTime(0.04, now + 0.01);
+                aG.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                arp.connect(aG); aG.connect(compressor);
+                arp.start(); arp.stop(now + 0.3);
             }
-
-            // 3. SOFT DRUMS
-            const drum = audioCtx.createOscillator();
-            const dGain = audioCtx.createGain();
-            drum.type = 'sine';
-            if (step % 4 === 0) { 
-                drum.frequency.setValueAtTime(80, now);
-                drum.frequency.exponentialRampToValueAtTime(30, now + 0.1);
-                dGain.gain.setValueAtTime(0.2, now);
-            } else if (step % 4 === 2) { 
-                drum.frequency.setValueAtTime(150, now);
-                dGain.gain.setValueAtTime(0.05, now);
-            }
-            if (step % 4 === 0 || step % 4 === 2) {
-                drum.connect(dGain);
-                dGain.connect(filter);
-                drum.start(); drum.stop(now + 0.1);
-            }
-
-            step = (step + 1) % 16;
-            pulseSize = 12; 
+            tick++;
         }
 
-        // --- GAME LOGIC ---
         let highScore = localStorage.getItem('phaseShiftBest') || 0;
         highScoreElement.innerText = highScore;
-
-        let laneWidth, pSize, playerY, speedBase;
-        let stars = [];
+        let laneWidth, pSize, playerY, speedBase, stars = [];
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -136,48 +132,29 @@
 
         function initStars() {
             stars = [];
-            for(let i=0; i<50; i++) {
-                stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, s: Math.random() * 2 });
-            }
+            for(let i=0; i<50; i++) stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, s: Math.random() * 2 });
         }
 
         window.addEventListener('resize', resize);
         resize();
 
-        let score = 0;
-        let gameActive = true;
-        let playerSide = 0; 
-        let obstacles = [];
-        let speed = speedBase;
-        let spawnTimer = 0;
-        let spawnInterval = 45; 
-        let lastSide = -1;
-        let sideRepeatCount = 0;
+        let score = 0, gameActive = true, playerSide = 0, obstacles = [], speed = speedBase;
+        let spawnTimer = 0, spawnInterval = 45, lastSide = -1, sideRepeatCount = 0;
 
         function handleInput() {
-            // 1. Force Resume
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            // iOS Audio Unlock Logic
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const source = audioCtx.createBufferSource();
+            source.buffer = audioCtx.createBuffer(1, 1, 22050);
+            source.connect(audioCtx.destination);
+            source.start();
 
-            // 2. iOS "Silent Kickstart"
-            // Create a tiny, silent beep to tell iOS the audio engine is active
-            const osc = audioCtx.createOscillator();
-            const g = audioCtx.createGain();
-            g.gain.setValueAtTime(0.0001, audioCtx.currentTime); // Basically silent
-            osc.connect(g);
-            g.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.01);
-
-            if (!gameActive) {
-                restart();
-            } else {
-                playerSide = playerSide === 0 ? 1 : 0;
-            }
+            if (!gameActive) restart();
+            else playerSide = playerSide === 0 ? 1 : 0;
         }
+        
         window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
-        window.addEventListener('mousedown', handleInput);
+        window.addEventListener('mousedown', (e) => { handleInput(); });
 
         function spawnObstacle() {
             if (obstacles.length > 0 && obstacles[obstacles.length-1].y < pSize * 2.5) return;
@@ -190,15 +167,14 @@
             score = 0; scoreElement.innerText = "0";
             obstacles = []; speed = speedBase;
             spawnInterval = 45; gameActive = true;
-            sideRepeatCount = 0; lastSide = -1;
-            step = 0;
+            tick = 0;
         }
 
         function update() {
             if (!gameActive) return;
             spawnTimer++;
             if (spawnTimer >= spawnInterval) { spawnObstacle(); spawnTimer = 0; }
-            if (spawnTimer % 12 === 0) playSynthStep();
+            if (spawnTimer % 12 === 0) playMusicTick();
             pulseSize *= 0.85; 
 
             stars.forEach(s => {
@@ -208,8 +184,7 @@
 
             obstacles.forEach((obs, index) => {
                 obs.y += speed;
-                const obsSide = obs.x > laneWidth ? 1 : 0;
-                if (obs.y + obs.h > playerY && obs.y < playerY + pSize && playerSide === obsSide) {
+                if (obs.y + obs.h > playerY && obs.y < playerY + pSize && playerSide === (obs.x > laneWidth ? 1 : 0)) {
                     gameActive = false;
                 }
                 if (obs.y > canvas.height) {
@@ -230,7 +205,6 @@
         function draw() {
             ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
             ctx.fillStyle = "#fff";
             stars.forEach(s => ctx.fillRect(s.x, s.y, s.s, s.s));
 
@@ -243,25 +217,18 @@
             ctx.fillRect(canvas.width/2 - glowIntensity, 0, glowIntensity*2, canvas.height);
 
             const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
-            
             ctx.shadowBlur = 15 + pulseSize; ctx.shadowColor = '#00ccff';
             ctx.fillStyle = '#fff';
             ctx.fillRect(playerX - pulseSize/4, playerY - pulseSize/4, pSize + pulseSize/2, pSize + pulseSize/2);
-            ctx.strokeStyle = '#3300ff'; ctx.lineWidth = 4;
-            ctx.strokeRect(playerX - pulseSize/4, playerY - pulseSize/4, pSize + pulseSize/2, pSize + pulseSize/2);
-
+            
             obstacles.forEach(obs => {
                 ctx.shadowBlur = 10 + pulseSize; ctx.shadowColor = '#ff00ff';
                 ctx.fillStyle = '#ff00ff';
                 ctx.fillRect(obs.x - pulseSize/6, obs.y - pulseSize/6, obs.w + pulseSize/3, obs.h + pulseSize/3);
-                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-                ctx.strokeRect(obs.x + 4, obs.y + 4, obs.w - 8, obs.h - 8);
             });
             ctx.shadowBlur = 0;
 
             if (!gameActive) {
-                ctx.fillStyle = 'rgba(255, 0, 255, 0.1)';
-                ctx.fillRect(Math.random()*10, 0, canvas.width, canvas.height);
                 ctx.fillStyle = 'rgba(0,0,0,0.85)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = '#00ff88';
