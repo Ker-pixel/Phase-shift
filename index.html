@@ -9,7 +9,6 @@
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: 'Courier New', Courier, monospace; overflow: hidden; touch-action: manipulation; }
         
-        /* Scanline Overlay Effect */
         body::after {
             content: " ";
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -54,6 +53,71 @@
         const scoreElement = document.getElementById('score');
         const highScoreElement = document.getElementById('highScore');
 
+        // --- ENHANCED AUDIO ENGINE ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, audioCtx.currentTime); 
+        filter.connect(audioCtx.destination);
+
+        let pulseSize = 0;
+        let step = 0;
+        const notes = [220.00, 261.63, 293.66, 329.63, 392.00]; 
+
+        function playSynthStep() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const now = audioCtx.currentTime;
+
+            // 1. SMOOTH BASS
+            const bass = audioCtx.createOscillator();
+            const bassGain = audioCtx.createGain();
+            bass.type = 'triangle';
+            bass.frequency.setValueAtTime(55, now); 
+            bassGain.gain.setValueAtTime(0, now);
+            bassGain.gain.linearRampToValueAtTime(0.15, now + 0.02);
+            bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+            bass.connect(bassGain);
+            bassGain.connect(filter);
+            bass.start(); bass.stop(now + 0.3);
+
+            // 2. SOFT MELODY
+            if (step % 2 === 0) {
+                const mel = audioCtx.createOscillator();
+                const melGain = audioCtx.createGain();
+                mel.type = 'sine';
+                const noteIdx = (step + Math.floor(Math.random() * 2)) % notes.length;
+                mel.frequency.setValueAtTime(notes[noteIdx], now);
+                melGain.gain.setValueAtTime(0, now);
+                melGain.gain.linearRampToValueAtTime(0.06, now + 0.01);
+                melGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                mel.connect(melGain);
+                melGain.connect(filter);
+                mel.start(); mel.stop(now + 0.2);
+            }
+
+            // 3. SOFT DRUMS
+            const drum = audioCtx.createOscillator();
+            const dGain = audioCtx.createGain();
+            drum.type = 'sine';
+            if (step % 4 === 0) { 
+                drum.frequency.setValueAtTime(80, now);
+                drum.frequency.exponentialRampToValueAtTime(30, now + 0.1);
+                dGain.gain.setValueAtTime(0.2, now);
+            } else if (step % 4 === 2) { 
+                drum.frequency.setValueAtTime(150, now);
+                dGain.gain.setValueAtTime(0.05, now);
+            }
+            if (step % 4 === 0 || step % 4 === 2) {
+                drum.connect(dGain);
+                dGain.connect(filter);
+                drum.start(); drum.stop(now + 0.1);
+            }
+
+            step = (step + 1) % 16;
+            pulseSize = 12; 
+        }
+
+        // --- GAME LOGIC ---
         let highScore = localStorage.getItem('phaseShiftBest') || 0;
         highScoreElement.innerText = highScore;
 
@@ -93,6 +157,7 @@
         function handleInput() {
             if (!gameActive) restart();
             else playerSide = playerSide === 0 ? 1 : 0;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
         }
         window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
         window.addEventListener('mousedown', handleInput);
@@ -101,7 +166,7 @@
             if (obstacles.length > 0 && obstacles[obstacles.length-1].y < pSize * 2.5) return;
             let side = (sideRepeatCount >= 3) ? (lastSide === 0 ? 1 : 0) : (Math.random() < 0.5 ? 0 : 1);
             if (side === lastSide) sideRepeatCount++; else { sideRepeatCount = 1; lastSide = side; }
-            obstacles.push({ x: side * laneWidth + (laneWidth/2 - pSize/2), y: -pSize, w: pSize, h: pSize, hue: Math.random() * 60 + 280 });
+            obstacles.push({ x: side * laneWidth + (laneWidth/2 - pSize/2), y: -pSize, w: pSize, h: pSize });
         }
 
         function restart() {
@@ -109,14 +174,16 @@
             obstacles = []; speed = speedBase;
             spawnInterval = 45; gameActive = true;
             sideRepeatCount = 0; lastSide = -1;
+            step = 0;
         }
 
         function update() {
             if (!gameActive) return;
             spawnTimer++;
             if (spawnTimer >= spawnInterval) { spawnObstacle(); spawnTimer = 0; }
+            if (spawnTimer % 12 === 0) playSynthStep();
+            pulseSize *= 0.85; 
 
-            // Move Stars
             stars.forEach(s => {
                 s.y += speed * 0.5;
                 if(s.y > canvas.height) s.y = 0;
@@ -144,46 +211,40 @@
         }
 
         function draw() {
-            // Neon Background Persistence (Motion Blur)
             ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; 
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Stars
             ctx.fillStyle = "#fff";
             stars.forEach(s => ctx.fillRect(s.x, s.y, s.s, s.s));
 
-            // Central Lane Glow
+            const glowIntensity = 8 + pulseSize;
             const gradient = ctx.createLinearGradient(canvas.width/2-2, 0, canvas.width/2+2, 0);
             gradient.addColorStop(0, "transparent");
             gradient.addColorStop(0.5, "#3300ff");
             gradient.addColorStop(1, "transparent");
             ctx.fillStyle = gradient;
-            ctx.fillRect(canvas.width/2 - 15, 0, 30, canvas.height);
+            ctx.fillRect(canvas.width/2 - glowIntensity, 0, glowIntensity*2, canvas.height);
 
             const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
             
-            // Draw Player with Heavy Glow
-            ctx.shadowBlur = 20; ctx.shadowColor = '#00ccff';
+            ctx.shadowBlur = 15 + pulseSize; ctx.shadowColor = '#00ccff';
             ctx.fillStyle = '#fff';
-            ctx.fillRect(playerX, playerY, pSize, pSize);
+            ctx.fillRect(playerX - pulseSize/4, playerY - pulseSize/4, pSize + pulseSize/2, pSize + pulseSize/2);
             ctx.strokeStyle = '#3300ff'; ctx.lineWidth = 4;
-            ctx.strokeRect(playerX, playerY, pSize, pSize);
+            ctx.strokeRect(playerX - pulseSize/4, playerY - pulseSize/4, pSize + pulseSize/2, pSize + pulseSize/2);
 
-            // Draw Obstacles (Pink Neon)
             obstacles.forEach(obs => {
-                ctx.shadowBlur = 15; ctx.shadowColor = '#ff00ff';
+                ctx.shadowBlur = 10 + pulseSize; ctx.shadowColor = '#ff00ff';
                 ctx.fillStyle = '#ff00ff';
-                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                ctx.fillRect(obs.x - pulseSize/6, obs.y - pulseSize/6, obs.w + pulseSize/3, obs.h + pulseSize/3);
                 ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
                 ctx.strokeRect(obs.x + 4, obs.y + 4, obs.w - 8, obs.h - 8);
             });
             ctx.shadowBlur = 0;
 
             if (!gameActive) {
-                // Glitch effect on death
                 ctx.fillStyle = 'rgba(255, 0, 255, 0.1)';
                 ctx.fillRect(Math.random()*10, 0, canvas.width, canvas.height);
-                
                 ctx.fillStyle = 'rgba(0,0,0,0.85)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = '#00ff88';
