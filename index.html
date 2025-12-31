@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Phase Shift</title>
+    <meta name="theme-color" content="#050505">
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: manipulation; }
+        #ad-partner {
+            height: 70px; width: 100%; background: #111; 
+            display: flex; align-items: center; justify-content: center;
+            border-bottom: 2px solid #3300ff; box-sizing: border-box;
+            padding: 10px; box-shadow: 0px 5px 15px rgba(51, 0, 255, 0.4);
+        }
+        .partner-box { width: 40px; height: 40px; border: 2px solid #00ff88; margin-right: 12px; border-radius: 4px; box-shadow: 0 0 10px #00ff88; }
+        .ad-text { font-size: 13px; letter-spacing: 1px; line-height: 1.2; }
+        .ad-text b { color: #00ff88; text-shadow: 0 0 5px #00ff88; }
+        canvas { display: block; margin: 0 auto; }
+        #ui { position: absolute; top: 85px; width: 100%; text-align: center; pointer-events: none; }
+        #score { font-size: 48px; font-weight: bold; color: #ff00ff; text-shadow: 0 0 20px #ff00ff; }
+        #best-ui { position: absolute; top: 85px; right: 20px; font-family: monospace; color: #00ff88; font-size: 14px; text-shadow: 0 0 5px #00ff88; }
+    </style>
+</head>
+<body>
+
+    <div id="ad-partner">
+        <div class="partner-box"></div>
+        <div class="ad-text">PARTNER STATUS: <b>OFFLINE</b><br>[WAITING FOR SPONSOR...]</div>
+    </div>
+
+    <div id="ui"><div id="score">0</div></div>
+    <div id="best-ui">BEST: <span id="highScore">0</span></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const highScoreElement = document.getElementById('highScore');
+
+        // LOAD HIGH SCORE FROM LOCAL STORAGE
+        let highScore = localStorage.getItem('phaseShiftBest') || 0;
+        highScoreElement.innerText = highScore;
+
+        let laneWidth, pSize, playerY, speedBase;
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 70;
+            laneWidth = canvas.width / 2;
+            pSize = Math.min(Math.max(canvas.width * 0.12, 30), 50);
+            playerY = canvas.height - (pSize * 2.5);
+            speedBase = canvas.height * 0.008;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        let score = 0;
+        let gameActive = true;
+        let playerSide = 0; 
+        let obstacles = [];
+        let speed = speedBase;
+        let spawnTimer = 0;
+        let spawnInterval = 50; 
+        let lastSide = -1;
+        let sideRepeatCount = 0;
+
+        function handleInput() {
+            if (!gameActive) restart();
+            else playerSide = playerSide === 0 ? 1 : 0;
+        }
+        window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
+        window.addEventListener('mousedown', handleInput);
+
+        function spawnObstacle() {
+            if (obstacles.length > 0 && obstacles[obstacles.length-1].y < pSize * 3) return;
+            let side;
+            if (sideRepeatCount >= 2) {
+                side = lastSide === 0 ? 1 : 0;
+                sideRepeatCount = 0;
+            } else {
+                side = Math.random() > 0.5 ? 1 : 0;
+            }
+            if (side === lastSide) sideRepeatCount++;
+            else { sideRepeatCount = 1; lastSide = side; }
+
+            obstacles.push({ x: side * laneWidth + (laneWidth/2 - pSize/2), y: -pSize, w: pSize, h: pSize });
+        }
+
+        function restart() {
+            score = 0;
+            scoreElement.innerText = "0";
+            obstacles = [];
+            speed = speedBase;
+            spawnInterval = 50;
+            gameActive = true;
+            sideRepeatCount = 0;
+        }
+
+        function update() {
+            if (!gameActive) return;
+            spawnTimer++;
+            if (spawnTimer >= spawnInterval) {
+                spawnObstacle();
+                spawnTimer = 0;
+            }
+            obstacles.forEach((obs, index) => {
+                obs.y += speed;
+                const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
+                if (obs.y + obs.h > playerY && obs.y < playerY + pSize && (playerSide === (obs.x > laneWidth ? 1 : 0))) {
+                    gameActive = false;
+                }
+                if (obs.y > canvas.height) {
+                    obstacles.splice(index, 1);
+                    score++;
+                    scoreElement.innerText = score;
+
+                    // CHECK AND SAVE HIGH SCORE
+                    if (score > highScore) {
+                        highScore = score;
+                        highScoreElement.innerText = highScore;
+                        localStorage.setItem('phaseShiftBest', highScore);
+                    }
+
+                    speed += (canvas.height * 0.0002); 
+                    if (spawnInterval > 18) spawnInterval -= 0.2;
+                }
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = '#3300ff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([20, 20]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
+            ctx.shadowBlur = 15; ctx.shadowColor = '#3300ff';
+            ctx.fillStyle = '#3300ff';
+            ctx.fillRect(playerX, playerY, pSize, pSize);
+            ctx.strokeStyle = '#00ccff'; ctx.lineWidth = 3;
+            ctx.strokeRect(playerX, playerY, pSize, pSize);
+
+            obstacles.forEach(obs => {
+                ctx.shadowBlur = 15; ctx.shadowColor = '#ff00ff';
+                ctx.fillStyle = '#ff00ff';
+                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(obs.x + (obs.w*0.3), obs.y + (obs.h*0.3), obs.w*0.4, obs.h*0.4);
+            });
+            ctx.shadowBlur = 0;
+
+            if (!gameActive) {
+                ctx.fillStyle = 'rgba(0,0,0,0.85)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#00ff88';
+                ctx.font = `bold ${Math.max(20, canvas.width/12)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText('SYSTEM CRASH', canvas.width/2, canvas.height/2);
+                ctx.font = '16px sans-serif';
+                ctx.fillText('Tap to Reboot', canvas.width/2, canvas.height/2 + 40);
+            }
+            requestAnimationFrame(draw);
+            update();
+        }
+        draw();
+    </script>
+</body>
+</html>
