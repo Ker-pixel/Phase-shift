@@ -36,142 +36,162 @@
 
     <script>
         const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const scoreElement = document.getElementById('score');
-        const highScoreElement = document.getElementById('highScore');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const highScoreElement = document.getElementById('highScore');
 
-        // LOAD HIGH SCORE FROM LOCAL STORAGE
-        let highScore = localStorage.getItem('phaseShiftBest') || 0;
-        highScoreElement.innerText = highScore;
+    let highScore = localStorage.getItem('phaseShiftBest') || 0;
+    highScoreElement.innerText = highScore;
 
-        let laneWidth, pSize, playerY, speedBase;
+    let laneWidth, pSize, playerY, speedBase;
 
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight - 70;
-            laneWidth = canvas.width / 2;
-            pSize = Math.min(Math.max(canvas.width * 0.12, 30), 50);
-            playerY = canvas.height - (pSize * 2.5);
-            speedBase = canvas.height * 0.008;
-        }
-        window.addEventListener('resize', resize);
-        resize();
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight - 70;
+        laneWidth = canvas.width / 2;
+        pSize = Math.min(Math.max(canvas.width * 0.12, 30), 50);
+        playerY = canvas.height - (pSize * 2.5);
+        speedBase = canvas.height * 0.008;
+    }
+    window.addEventListener('resize', resize);
+    resize();
 
-        let score = 0;
-        let gameActive = true;
-        let playerSide = 0; 
-        let obstacles = [];
-        let speed = speedBase;
-        let spawnTimer = 0;
-        let spawnInterval = 50; 
-        let lastSide = -1;
-        let sideRepeatCount = 0;
+    let score = 0;
+    let gameActive = true;
+    let playerSide = 0; 
+    let obstacles = [];
+    let speed = speedBase;
+    let spawnTimer = 0;
+    let spawnInterval = 50; 
 
-        function handleInput() {
-            if (!gameActive) restart();
-            else playerSide = playerSide === 0 ? 1 : 0;
-        }
-        window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
-        window.addEventListener('mousedown', handleInput);
+    // NEW LOGIC: Prevent 4-in-a-row
+    let lastSide = -1;
+    let sideRepeatCount = 0;
 
-        function spawnObstacle() {
-            if (obstacles.length > 0 && obstacles[obstacles.length-1].y < pSize * 3) return;
-            let side;
-            if (sideRepeatCount >= 2) {
-                side = lastSide === 0 ? 1 : 0;
-                sideRepeatCount = 0;
+    function handleInput() {
+        if (!gameActive) restart();
+        else playerSide = playerSide === 0 ? 1 : 0;
+    }
+    window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, {passive: false});
+    window.addEventListener('mousedown', handleInput);
+
+    function spawnObstacle() {
+        if (obstacles.length > 0 && obstacles[obstacles.length-1].y < pSize * 2.5) return;
+
+        let side;
+        // If the same lane has been used 3 times, force the other lane
+        if (sideRepeatCount >= 3) {
+            side = (lastSide === 0) ? 1 : 0;
+            sideRepeatCount = 1; // Reset to 1 for the new side
+        } else {
+            side = Math.random() < 0.5 ? 0 : 1;
+            // Update the repeat counter
+            if (side === lastSide) {
+                sideRepeatCount++;
             } else {
-                side = Math.random() > 0.5 ? 1 : 0;
+                sideRepeatCount = 1;
             }
-            if (side === lastSide) sideRepeatCount++;
-            else { sideRepeatCount = 1; lastSide = side; }
+        }
+        
+        lastSide = side;
 
-            obstacles.push({ x: side * laneWidth + (laneWidth/2 - pSize/2), y: -pSize, w: pSize, h: pSize });
+        obstacles.push({
+            x: side * laneWidth + (laneWidth/2 - pSize/2),
+            y: -pSize,
+            w: pSize,
+            h: pSize
+        });
+    }
+
+    function restart() {
+        score = 0;
+        scoreElement.innerText = "0";
+        obstacles = [];
+        speed = speedBase;
+        spawnInterval = 50;
+        gameActive = true;
+        sideRepeatCount = 0;
+        lastSide = -1;
+    }
+
+    function update() {
+        if (!gameActive) return;
+        
+        spawnTimer++;
+        if (spawnTimer >= spawnInterval) {
+            spawnObstacle();
+            spawnTimer = 0;
         }
 
-        function restart() {
-            score = 0;
-            scoreElement.innerText = "0";
-            obstacles = [];
-            speed = speedBase;
-            spawnInterval = 50;
-            gameActive = true;
-            sideRepeatCount = 0;
-        }
-
-        function update() {
-            if (!gameActive) return;
-            spawnTimer++;
-            if (spawnTimer >= spawnInterval) {
-                spawnObstacle();
-                spawnTimer = 0;
-            }
-            obstacles.forEach((obs, index) => {
-                obs.y += speed;
-                const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
-                if (obs.y + obs.h > playerY && obs.y < playerY + pSize && (playerSide === (obs.x > laneWidth ? 1 : 0))) {
-                    gameActive = false;
-                }
-                if (obs.y > canvas.height) {
-                    obstacles.splice(index, 1);
-                    score++;
-                    scoreElement.innerText = score;
-
-                    // CHECK AND SAVE HIGH SCORE
-                    if (score > highScore) {
-                        highScore = score;
-                        highScoreElement.innerText = highScore;
-                        localStorage.setItem('phaseShiftBest', highScore);
-                    }
-
-                    speed += (canvas.height * 0.0002); 
-                    if (spawnInterval > 18) spawnInterval -= 0.2;
-                }
-            });
-        }
-
-        function draw() {
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.3)'; 
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.strokeStyle = '#3300ff';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([20, 20]);
-            ctx.beginPath();
-            ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
+        obstacles.forEach((obs, index) => {
+            obs.y += speed;
             const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
-            ctx.shadowBlur = 15; ctx.shadowColor = '#3300ff';
-            ctx.fillStyle = '#3300ff';
-            ctx.fillRect(playerX, playerY, pSize, pSize);
-            ctx.strokeStyle = '#00ccff'; ctx.lineWidth = 3;
-            ctx.strokeRect(playerX, playerY, pSize, pSize);
-
-            obstacles.forEach(obs => {
-                ctx.shadowBlur = 15; ctx.shadowColor = '#ff00ff';
-                ctx.fillStyle = '#ff00ff';
-                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(obs.x + (obs.w*0.3), obs.y + (obs.h*0.3), obs.w*0.4, obs.h*0.4);
-            });
-            ctx.shadowBlur = 0;
-
-            if (!gameActive) {
-                ctx.fillStyle = 'rgba(0,0,0,0.85)';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#00ff88';
-                ctx.font = `bold ${Math.max(20, canvas.width/12)}px sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.fillText('SYSTEM CRASH', canvas.width/2, canvas.height/2);
-                ctx.font = '16px sans-serif';
-                ctx.fillText('Tap to Reboot', canvas.width/2, canvas.height/2 + 40);
+            
+            const obsSide = obs.x > laneWidth ? 1 : 0;
+            if (obs.y + obs.h > playerY && obs.y < playerY + pSize && playerSide === obsSide) {
+                gameActive = false;
             }
-            requestAnimationFrame(draw);
-            update();
+
+            if (obs.y > canvas.height) {
+                obstacles.splice(index, 1);
+                score++;
+                scoreElement.innerText = score;
+
+                if (score > highScore) {
+                    highScore = score;
+                    highScoreElement.innerText = highScore;
+                    localStorage.setItem('phaseShiftBest', highScore);
+                }
+
+                speed += (canvas.height * 0.00015); 
+                if (spawnInterval > 22) spawnInterval -= 0.2;
+            }
+        });
+    }
+
+    function draw() {
+        ctx.fillStyle = 'rgba(5, 5, 5, 0.3)'; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = '#3300ff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([20, 20]);
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const playerX = playerSide * laneWidth + (laneWidth/2 - pSize/2);
+        
+        ctx.shadowBlur = 15; ctx.shadowColor = '#3300ff';
+        ctx.fillStyle = '#3300ff';
+        ctx.fillRect(playerX, playerY, pSize, pSize);
+        ctx.strokeStyle = '#00ccff'; ctx.lineWidth = 3;
+        ctx.strokeRect(playerX, playerY, pSize, pSize);
+
+        obstacles.forEach(obs => {
+            ctx.shadowBlur = 15; ctx.shadowColor = '#ff00ff';
+            ctx.fillStyle = '#ff00ff';
+            ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(obs.x + (obs.w*0.3), obs.y + (obs.h*0.3), obs.w*0.4, obs.h*0.4);
+        });
+        ctx.shadowBlur = 0;
+
+        if (!gameActive) {
+            ctx.fillStyle = 'rgba(0,0,0,0.85)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#00ff88';
+            ctx.font = `bold ${Math.max(20, canvas.width/12)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText('SYSTEM CRASH', canvas.width/2, canvas.height/2);
+            ctx.font = '16px sans-serif';
+            ctx.fillText('Tap to Reboot', canvas.width/2, canvas.height/2 + 40);
         }
-        draw();
+        requestAnimationFrame(draw);
+        update();
+    }
+    draw();
     </script>
 </body>
 </html>
