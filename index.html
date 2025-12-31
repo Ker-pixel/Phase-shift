@@ -155,10 +155,20 @@
         let sideRepeatCount = 0;
 
         function handleInput() {
-            // This is the "magic key" for mobile apps
+            // 1. Force Resume
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
             }
+
+            // 2. iOS "Silent Kickstart"
+            // Create a tiny, silent beep to tell iOS the audio engine is active
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            g.gain.setValueAtTime(0.0001, audioCtx.currentTime); // Basically silent
+            osc.connect(g);
+            g.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.01);
 
             if (!gameActive) {
                 restart();
